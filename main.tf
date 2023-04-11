@@ -1,3 +1,7 @@
+locals {
+  schema_arn_prefix = replace(aws_schemas_registry.schema_registry.arn, "registry/", "schema/")
+}
+
 provider "aws" {
   region = "us-west-2"
 }
@@ -50,8 +54,10 @@ resource "aws_iam_role_policy" "eventbridge_schema_registry_and_sns_policy" {
           "schemas:ListSchemas",
           "schemas:DescribeSchema"
         ]
-        Effect   = "Allow"
-        Resource = aws_schemas_registry.schema_registry.arn
+        Effect = "Allow"
+        Resource = [
+          "${local.schema_arn_prefix}/*"
+        ]
       },
       {
         Action   = "sns:Publish"
@@ -88,7 +94,7 @@ resource "aws_cloudwatch_event_rule" "eventbus_rule" {
   event_bus_name = aws_cloudwatch_event_bus.event_bus.name
   event_pattern = jsonencode({
     "source" : [
-      "*"
+      { prefix = "" }
     ]
   })
 }
@@ -107,3 +113,35 @@ resource "aws_cloudwatch_event_target" "eventbus_lambda_target" {
   arn            = aws_lambda_function.eventbridge_schema_validator.arn
 }
 
+resource "aws_iam_role" "eventbridge_invoke_lambda_role" {
+  name = "eventbridge-invoke-lambda-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "events.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "eventbridge_invoke_lambda_policy" {
+  name = "eventbridge-invoke-lambda-policy"
+  role = aws_iam_role.eventbridge_invoke_lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action   = "lambda:InvokeFunction"
+        Effect   = "Allow"
+        Resource = aws_lambda_function.eventbridge_schema_validator.arn
+      }
+    ]
+  })
+}
